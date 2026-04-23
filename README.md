@@ -25,7 +25,7 @@ The software uses the package `pyvisa` so oyu first need to install it:
 # User Interface
 
 
-From the GUI the user can specify different acquisition settings and interact with external hardware such as shutters and motorized stage.
+From the GUI the user can specify different acquisition settings and interact with external hardware such as motorized stage.
     
 # Software architecture
 
