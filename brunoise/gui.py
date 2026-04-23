@@ -142,6 +142,10 @@ class ViewingWidget(QWidget):
 
         self.first_image = True
         self.levelMode_in_use = "mono"
+        self.state.sig_display_changed.connect(self.reset_display_levels)
+
+    def reset_display_levels(self):
+        self.first_image = True
 
     def update(self) -> None:
         current_images = self.state.get_image()
@@ -180,11 +184,15 @@ class ScanningWidget(QWidget):
 
         self.scanning_settings_gui = ParameterGui(self.state.scanning_settings)
         self.scanning_calc = CalculatedParameterDisplay()
+        self.chk_inverted = QCheckBox("Inverted")
+        self.chk_inverted.setChecked(self.state.inverted)
+        self.chk_inverted.toggled.connect(self.state.set_inverted)
         self.pause_button = QPushButton()
         self.pause_button.clicked.connect(self.toggle_pause)
 
         self.scanning_layout.addWidget(self.scanning_settings_gui)
         self.scanning_layout.addWidget(self.scanning_calc)
+        self.scanning_layout.addWidget(self.chk_inverted)
         self.scanning_layout.addWidget(self.pause_button)
         self.setLayout(self.scanning_layout)
 

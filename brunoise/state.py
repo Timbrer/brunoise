@@ -100,6 +100,7 @@ def convert_params(st: ScanningSettings, piezo_z_um=0.0) -> ScanningParameters:
 
 class ExperimentState(QObject):
     sig_scanning_changed = pyqtSignal()
+    sig_display_changed = pyqtSignal()
 
     def __init__(self):
         super().__init__()
@@ -140,6 +141,7 @@ class ExperimentState(QObject):
         self.recording_n_frames = None
         self.recording_n_planes = None
         self.recording_plane_z_um = None
+        self.inverted = True
 
     @property
     def saving(self):
@@ -227,7 +229,9 @@ class ExperimentState(QObject):
 
     def get_image(self):
         try:
-            images = -self.reconstructor.output_queue.get(timeout=0.001)
+            images = self.reconstructor.output_queue.get(timeout=0.001)
+            if self.inverted:
+                images = -images
             try:
                 t = self.scanner.time_queue.get(timeout=0.001)
             except Empty:
@@ -245,6 +249,10 @@ class ExperimentState(QObject):
             return images
         except Empty:
             return None
+
+    def set_inverted(self, inverted):
+        self.inverted = inverted
+        self.sig_display_changed.emit()
 
     def set_piezo_z_um(self, z_um):
         self.piezo_z_um = float(np.clip(z_um, 0.0, PIEZO_MAX_UM))
