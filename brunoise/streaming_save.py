@@ -16,7 +16,6 @@ class SavingParameters:
     plane_size: tuple
     n_t: int = 100
     n_z: int = 1
-    channel: str = "Green"
 
 
 @dataclass
@@ -62,19 +61,12 @@ class StackSaver(Process):
         (Path(self.save_parameters.output_dir) / "original").mkdir(
             parents=True, exist_ok=True
         )
-        if self.save_parameters.channel == "Both":
-            (Path(self.save_parameters.output_dir) / "original" / "green").mkdir(
-                parents=True, exist_ok=True
-            )
-            (Path(self.save_parameters.output_dir) / "original" / "red").mkdir(
-                parents=True, exist_ok=True
-            )
 
         i_received = 0
         self.i_in_plane = 0
         self.i_block = 0
         self.current_data = np.empty(
-            (self.save_parameters.n_t, 2, *self.save_parameters.plane_size),
+            (self.save_parameters.n_t, 1, *self.save_parameters.plane_size),
             dtype=self.dtype,
         )
         self.current_time = np.empty(self.save_parameters.n_t)
@@ -154,37 +146,15 @@ class StackSaver(Process):
         )
 
     def finalize_dataset(self):
-        if self.save_parameters.channel == "Both":
-            with open(
-                    (
-                            Path(self.save_parameters.output_dir)
-                            / "original"
-                            / "green"
-                            / "stack_metadata.json"
-                    ),
-                    "w",
-            ) as fg,\
-            open(
+        with open(
                 (
                         Path(self.save_parameters.output_dir)
                         / "original"
-                        / "red"
                         / "stack_metadata.json"
                 ),
                 "w",
-            ) as fr:
-                self.dump_metadata(fg)
-                self.dump_metadata(fr)
-        else:
-            with open(
-                    (
-                            Path(self.save_parameters.output_dir)
-                            / "original"
-                            / "stack_metadata.json"
-                    ),
-                    "w",
-            ) as f:
-                self.dump_metadata(f)
+        ) as f:
+            self.dump_metadata(f)
 
     def complete_plane(self):
         if self.i_block == 0:
@@ -198,33 +168,12 @@ class StackSaver(Process):
             self.timestamps.T,
             compression="blosc",
         )
-        if self.save_parameters.channel == "Green":
-            fl.save(
-                Path(self.save_parameters.output_dir)
-                / "original/{:04d}.h5".format(self.i_block),
-                {"stack_4D": self.current_data[:,:1,:,:]},
-                compression="blosc",
-            )
-        elif self.save_parameters.channel == "Red":
-            fl.save(
-                Path(self.save_parameters.output_dir)
-                / "original/{:04d}.h5".format(self.i_block),
-                {"stack_4D": self.current_data[:,1:,:,:]},
-                compression="blosc",
-            )
-        else:
-            fl.save(
-                Path(self.save_parameters.output_dir)
-                / "original/green/{:04d}.h5".format(self.i_block),
-                {"stack_4D": self.current_data[:,:1,:,:]},
-                compression="blosc",
-            )
-            fl.save(
-                Path(self.save_parameters.output_dir)
-                / "original/red/{:04d}.h5".format(self.i_block),
-                {"stack_4D": self.current_data[:,1:,:,:]},
-                compression="blosc",
-            )
+        fl.save(
+            Path(self.save_parameters.output_dir)
+            / "original/{:04d}.h5".format(self.i_block),
+            {"stack_4D": self.current_data},
+            compression="blosc",
+        )
         self.i_block += 1
 
         self.i_in_plane = 0

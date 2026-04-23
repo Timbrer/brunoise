@@ -27,7 +27,6 @@ class ExperimentSettings(ParametrizedQt):
         self.n_planes = Param(1, (1, 500))
         self.n_frames = Param(100, (1, 100000))
         self.dz = Param(1.0, (-50, 50.0), unit="um")
-        self.channel = Param("Green", ["Green", "Red", "Both"])
         self.save_dir = Param(r"C:\Users\portugueslab\Desktop\test", gui=False)
 
 
@@ -259,7 +258,6 @@ class ExperimentState(QObject):
                 plane_size=(self.scanning_parameters.n_x, self.scanning_parameters.n_y),
                 n_t=n_t,
                 n_z=n_z,
-                channel=self.experiment_settings.channel
             )
         )
 
