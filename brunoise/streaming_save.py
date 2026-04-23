@@ -16,6 +16,7 @@ class SavingParameters:
     plane_size: tuple
     n_t: int = 100
     n_z: int = 1
+    plane_z_um: tuple = ()
 
 
 @dataclass
@@ -32,6 +33,7 @@ class StackSaver(Process):
         self.data_queue = data_queue
         self.time_queue = time_queue
         self.saving_signal = Event()
+        self.busy_signal = Event()
         self.saving = False
         self.saving_parameter_queue = Queue()
         self.save_parameters: Optional[SavingParameters] = None
@@ -52,52 +54,54 @@ class StackSaver(Process):
                 self.receive_save_parameters()
 
     def save_loop(self):
-        # remove files if some are found at the save location
-        if (
-                Path(self.save_parameters.output_dir) / "original" / "stack_metadata.json"
-        ).is_file():
-            shutil.rmtree(Path(self.save_parameters.output_dir) / "original")
+        self.busy_signal.set()
+        try:
+            # remove files if some are found at the save location
+            if (
+                    Path(self.save_parameters.output_dir) / "original" / "stack_metadata.json"
+            ).is_file():
+                shutil.rmtree(Path(self.save_parameters.output_dir) / "original")
 
-        (Path(self.save_parameters.output_dir) / "original").mkdir(
-            parents=True, exist_ok=True
-        )
+            (Path(self.save_parameters.output_dir) / "original").mkdir(
+                parents=True, exist_ok=True
+            )
 
-        i_received = 0
-        self.i_in_plane = 0
-        self.i_block = 0
-        self.current_data = np.empty(
-            (self.save_parameters.n_t, 1, *self.save_parameters.plane_size),
-            dtype=self.dtype,
-        )
-        self.current_time = np.empty(self.save_parameters.n_t)
-        n_total = self.save_parameters.n_t * self.save_parameters.n_z
-        while (
-                i_received < n_total
-                and self.saving_signal.is_set()
-                and not self.stop_signal.is_set()
-        ):
-            self.receive_save_parameters()
-            try:
-                frame = self.data_queue.get(timeout=0.01)
-                self.fill_dataset(frame)
-                i_received += 1
-            except Empty:
-                pass
-        
-        t_end = time.time()
-        while time.time() - t_end < 5:
-            try:
-                frame = self.data_queue.get(timeout=0.01)
-                self.fill_dataset(frame)
-                break
-            except Empty:
-                pass
-        
-        if self.i_block > 0:
-            self.finalize_dataset()
+            i_received = 0
+            self.i_in_plane = 0
+            self.i_block = 0
+            self.current_data = np.empty(
+                (self.save_parameters.n_t, 1, *self.save_parameters.plane_size),
+                dtype=self.dtype,
+            )
+            self.current_time = np.empty(self.save_parameters.n_t)
+            n_total = self.save_parameters.n_t * self.save_parameters.n_z
+            while (
+                    i_received < n_total
+                    and self.saving_signal.is_set()
+                    and not self.stop_signal.is_set()
+            ):
+                self.receive_save_parameters()
+                try:
+                    frame = self.data_queue.get(timeout=0.01)
+                    self.fill_dataset(frame)
+                    i_received += 1
+                except Empty:
+                    pass
 
-        self.saving_signal.clear()
-        self.save_parameters = None
+            t_end = time.time()
+            while time.time() - t_end < 5:
+                try:
+                    frame = self.data_queue.get(timeout=0.01)
+                    self.fill_dataset(frame)
+                    break
+                except Empty:
+                    pass
+
+            if self.i_block > 0:
+                self.finalize_dataset()
+        finally:
+            self.save_parameters = None
+            self.busy_signal.clear()
 
     def cast(self, frame):
         """
@@ -141,6 +145,7 @@ class StackSaver(Process):
                 "crop_start": [0, 0, 0, 0],
                 "crop_end": [0, 0, 0, 0],
                 "padding": [0, 0, 0, 0],
+                "plane_z_um": list(self.save_parameters.plane_z_um),
             },
             file,
         )
@@ -171,7 +176,7 @@ class StackSaver(Process):
         fl.save(
             Path(self.save_parameters.output_dir)
             / "original/{:04d}.h5".format(self.i_block),
-            {"stack_4D": self.current_data},
+            {"stack_4D": self.current_data[:,:1,:,:]},
             compression="blosc",
         )
         self.i_block += 1

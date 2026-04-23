@@ -11,23 +11,24 @@ from pathlib import Path
 from streaming_save import StackSaver, SavingParameters, SavingStatus
 from arrayqueues.shared_arrays import ArrayQueue
 from queue import Empty
-from brunoise.objective_motor import MotorControl
 from PyQt5.QtCore import QObject, pyqtSignal
 from typing import Optional
 from time import sleep
 from sequence_diagram import SequenceDiagram
 import numpy as np
 
+PIEZO_MAX_UM = 450.0
+PIEZO_UM_PER_VOLT = 45.0
+PIEZO_MAX_VOLTAGE = PIEZO_MAX_UM / PIEZO_UM_PER_VOLT
 
 class ExperimentSettings(ParametrizedQt):
     def __init__(self):
         super().__init__()
         self.name = "recording"
-        self.lock_z = Param(True)
         self.n_planes = Param(1, (1, 500))
         self.n_frames = Param(100, (1, 100000))
         self.dz = Param(1.0, (-50, 50.0), unit="um")
-        self.save_dir = Param(r"C:\Users\portugueslab\Desktop\test", gui=False)
+        self.save_dir = Param(str(Path.home() / "Desktop"), gui=False)
 
 
 class ScanningSettings(ParametrizedQt):
@@ -44,7 +45,7 @@ class ScanningSettings(ParametrizedQt):
         self.pause = Param(1, (0, 1))  # Int as Boolean GUI generation is not supported.
 
 
-def convert_params(st: ScanningSettings) -> ScanningParameters:
+def convert_params(st: ScanningSettings, piezo_z_um=0.0) -> ScanningParameters:
     """
     Converts the GUI scanning settings in parameters appropriate for the
     laser scanning
@@ -80,10 +81,12 @@ def convert_params(st: ScanningSettings) -> ScanningParameters:
     else:
         voltage_y = voltage_max * st.aspect_ratio
         voltage_x = voltage_max
+    voltage_z = float(np.clip(piezo_z_um / PIEZO_UM_PER_VOLT, 0.0, PIEZO_MAX_VOLTAGE))
 
     sp = ScanningParameters(
         voltage_x=voltage_x,
         voltage_y=voltage_y,
+        voltage_z=voltage_z,
         n_x=n_x,
         n_y=n_y,
         n_turn=st.n_turn,
@@ -124,10 +127,8 @@ class ExperimentState(QObject):
         )
         self.save_status: Optional[SavingStatus] = None
 
-        self.motors = dict()
-        self.motors["x"] = MotorControl("COM5", axes="x")
-        self.motors["y"] = MotorControl("COM5", axes="y")
-        self.motors["z"] = MotorControl("COM5", axes="z")
+        self.piezo_z_um = 225.0
+        self.recording_start_z_um = 0.0
         self.scanning_settings.sig_param_changed.connect(self.send_scan_params)
         self.scanning_settings.sig_param_changed.connect(self.send_save_params)
         self.scanner.start()
@@ -136,38 +137,52 @@ class ExperimentState(QObject):
         self.open_setup()
 
         self.paused = False
+        self.recording = False
         self.current_plane = 0
         self.frames_in_plane = 0
         self.plane_end_requested = False
         self.recording_n_frames = None
         self.recording_n_planes = None
+        self.recording_plane_z_um = None
 
     @property
     def saving(self):
-        return self.saver.saving_signal.is_set()
+        return self.recording
+
+    @property
+    def save_in_progress(self):
+        return self.saver.busy_signal.is_set()
 
     def open_setup(self):
         self.send_scan_params()
 
     def start_experiment(self, first_plane=True):
+        if first_plane and self.save_in_progress:
+            return False
+
         if first_plane:
             self.current_plane = 0
             self.recording_n_frames = self.experiment_settings.n_frames
             self.recording_n_planes = self.experiment_settings.n_planes
+            self.recording_start_z_um = self.piezo_z_um
+            self.recording_plane_z_um = self.compute_plane_z_positions(
+                self.recording_start_z_um,
+                self.recording_n_planes,
+                self.experiment_settings.dz,
+            )
 
-        params_to_send = convert_params(self.scanning_settings)
+        params_to_send = convert_params(self.scanning_settings, self.piezo_z_um)
         params_to_send.scanning_state = ScanningState.EXPERIMENT_RUNNING
         params_to_send.n_frames = self.recording_n_frames
         self.scanner.parameter_queue.put(params_to_send)
 
+        self.recording = True
         self.frames_in_plane = 0
         self.plane_end_requested = False
         if first_plane:
             self.send_save_params()
             self.saver.saving_signal.set()
         self.experiment_start_event.set()
-        if self.experiment_settings.lock_z:
-            self.motors["z"].send_command("MF")
         return True
 
     def end_experiment(self, force=False):
@@ -177,30 +192,29 @@ class ExperimentState(QObject):
         if not force and self.current_plane + 1 < self.recording_n_planes:
             self.advance_plane()
         else:
+            self.recording = False
             sleep(0.2)
             self.saver.saving_signal.clear()
-            self.motors["z"].send_command("MO")
             if self.pause_after:
                 self.pause_scanning()
             else:
                 self.restart_scanning()
 
     def restart_scanning(self):
-        params_to_send = convert_params(self.scanning_settings)
+        params_to_send = convert_params(self.scanning_settings, self.piezo_z_um)
         params_to_send.scanning_state = ScanningState.PREVIEW
         self.scanner.parameter_queue.put(params_to_send)
         self.paused = False
 
     def pause_scanning(self):
-        params_to_send = convert_params(self.scanning_settings)
+        params_to_send = convert_params(self.scanning_settings, self.piezo_z_um)
         params_to_send.scanning_state = ScanningState.PAUSED
         self.scanner.parameter_queue.put(params_to_send)
         self.paused = True
 
     def advance_plane(self):
         self.current_plane += 1
-        self.motors["z"].send_command("MO")
-        self.motors["z"].move_rel(self.experiment_settings.dz / 1000)
+        self.piezo_z_um = self.recording_plane_z_um[self.current_plane]
         sleep(0.2)
         self.start_experiment(first_plane=False)
 
@@ -209,8 +223,6 @@ class ExperimentState(QObject):
         end all parallel processes, close all communication channels
 
         """
-        for motor in self.motors.values():
-            motor.end_session()
         self.scanner.stop_event.set()
         self.end_event.set()
         self.scanner.join()
@@ -225,7 +237,7 @@ class ExperimentState(QObject):
             except Empty:
                 t = 0
                 print("scanner time queue is empty")
-            if self.saver.saving_signal.is_set():
+            if self.recording:
                 self.save_queue.put(images)
                 self.timestamp_queue.put(t)
                 self.frames_in_plane += 1
@@ -238,19 +250,36 @@ class ExperimentState(QObject):
         except Empty:
             return None
 
+    def set_piezo_z_um(self, z_um):
+        self.piezo_z_um = float(np.clip(z_um, 0.0, PIEZO_MAX_UM))
+        if not self.saving:
+            self.send_scan_params()
+
+    def compute_plane_z_positions(self, start_z_um, n_planes, dz_um):
+        return tuple(
+            float(np.clip(start_z_um + (i * dz_um), 0.0, PIEZO_MAX_UM))
+            for i in range(n_planes)
+        )
+
     def send_scan_params(self):
-        self.scanning_parameters = convert_params(self.scanning_settings)
+        self.scanning_parameters = convert_params(self.scanning_settings, self.piezo_z_um)
         self.scanner.parameter_queue.put(self.scanning_parameters)
         self.reconstructor.parameter_queue.put(self.scanning_parameters)
         self.sig_scanning_changed.emit()
 
     def send_save_params(self):
-        if self.saving or self.experiment_start_event.is_set():
+        if self.recording or self.experiment_start_event.is_set():
             n_t = self.recording_n_frames
             n_z = self.recording_n_planes
+            plane_z_um = self.recording_plane_z_um
         else:
             n_t = self.experiment_settings.n_frames
             n_z = self.experiment_settings.n_planes
+            plane_z_um = self.compute_plane_z_positions(
+                self.piezo_z_um,
+                n_z,
+                self.experiment_settings.dz,
+            )
 
         self.saver.saving_parameter_queue.put(
             SavingParameters(
@@ -258,6 +287,7 @@ class ExperimentState(QObject):
                 plane_size=(self.scanning_parameters.n_x, self.scanning_parameters.n_y),
                 n_t=n_t,
                 n_z=n_z,
+                plane_z_um=plane_z_um,
             )
         )
 

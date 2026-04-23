@@ -17,15 +17,11 @@ hardware by other vendors.
 # Installation
 
 Clone this repository and navigate to the main folder `../brunoise`
-    
-The software uses the package `pyvisa` so oyu first need to install it:
-
-    pip install pyvisa
 
 # User Interface
 
 
-From the GUI the user can specify different acquisition settings and interact with external hardware such as motorized stage.
+From the GUI the user can specify different acquisition settings and interact with external hardware such as piezo z control.
     
 # Software architecture
 

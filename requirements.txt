@@ -9,3 +9,4 @@ nidaqmx==0.6.5
 pyqtgraph==0.12.4
 napari==0.4.19
 numba==0.55.2
+napari-split-dataset==0.3.0

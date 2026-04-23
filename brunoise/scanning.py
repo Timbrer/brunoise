@@ -6,11 +6,13 @@ try:
     from nidaqmx.stream_readers import AnalogMultiChannelReader
     from nidaqmx.stream_writers import AnalogMultiChannelWriter
     from nidaqmx.constants import Edge, AcquisitionType
+    from nidaqmx.errors import DaqError
 except ImportError:
     from theknights.task import Task
     from theknights.stream_readers import AnalogMultiChannelReader
     from theknights.stream_writers import AnalogMultiChannelWriter
     from theknights.constants import Edge, AcquisitionType
+    from theknights.errors import DaqError
 
 
 from arrayqueues.shared_arrays import ArrayQueue
@@ -35,6 +37,7 @@ class ScanningParameters:
     n_y: int = 400
     voltage_x: float = 3
     voltage_y: float = 3
+    voltage_z: float = 0
     n_bin: int = 10
     n_turn: int = 10
     n_extra: int = 10
@@ -57,7 +60,6 @@ def compute_waveform(sp: ScanningParameters):
     return scanning_patterns.simple_scanning_pattern(
         sp.n_x, sp.n_y, sp.n_turn, sp.n_extra, sp.pause
     )
-
 
 class Scanner(Process):
     def __init__(self, experiment_start_event, max_queuesize=200):
@@ -106,7 +108,14 @@ class Scanner(Process):
 
         self.sample_rate_in = self.n_bin * self.sample_rate_out
 
-        self.write_signals = np.stack([self.pos_x, self.pos_y], 0)
+        self.write_signals = np.stack(
+            [
+                self.pos_x,
+                self.pos_y,
+                np.full(self.n_samples_out, self.scanning_parameters.voltage_z),
+            ],
+            0,
+        )
         self.read_buffer = np.zeros((1, self.n_samples_in))
         self.mystery_offset = self.scanning_parameters.mystery_offset
 
@@ -115,9 +124,9 @@ class Scanner(Process):
         read_task.ai_channels.add_ai_voltage_chan(
             "Dev1/ai1", min_val=-1, max_val=1
         )
-        write_task.ao_channels.add_ao_voltage_chan(
-            "Dev1/ao0:1", min_val=-10, max_val=10
-        )
+        write_task.ao_channels.add_ao_voltage_chan("Dev1/ao0", min_val=-5, max_val=5)
+        write_task.ao_channels.add_ao_voltage_chan("Dev1/ao1", min_val=-5, max_val=5)
+        write_task.ao_channels.add_ao_voltage_chan("Dev1/ao2", min_val=0, max_val=10)
         # Set the timing of both to the onboard clock so that they are synchronised
         read_task.timing.cfg_samp_clk_timing(
             rate=self.sample_rate_in,
@@ -142,9 +151,11 @@ class Scanner(Process):
     def check_start_plane(self):
         if self.scanning_parameters.scanning_state == ScanningState.EXPERIMENT_RUNNING:
             while not self.experiment_start_event.is_set():
-                sleep(0.00001)
+                sleep(0.0001)
 
     def wait_next_parameters(self):
+        if self.new_parameters != self.scanning_parameters:
+            return
         while not self.stop_event.is_set():
             try:
                 self.new_parameters = self.parameter_queue.get(timeout=0.001)
@@ -179,10 +190,11 @@ class Scanner(Process):
                 )
                 self.time_queue.put(perf_counter())
                 i_acquired += 1
-            except nidaqmx.DaqError as e:
+            except DaqError as e:
                 print(e)
                 break
-            self.data_queue.put(self.read_buffer.copy())
+            raw_frame = self.read_buffer.copy()
+            self.data_queue.put(raw_frame)
             # if new parameters have been received and changed, update
             # them, breaking out of the loop if the experiment is not running
             try:
@@ -263,7 +275,6 @@ class ImageReconstructor(Process):
                             self.scanning_parameters.n_bin,
                         )
                     )
-                self.output_queue.put(np.stack(recon_images)
-                )
+                self.output_queue.put(np.stack(recon_images))
             except Empty:
                 pass
