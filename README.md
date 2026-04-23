@@ -12,8 +12,7 @@ It is developed by members of the [Portugues Lab](http://www.portugueslab.com/)
  at the Technical University of Munich and Max Planck Institute of Neurobiology. 
  
 Like [Sashimi](https://github.com/portugueslab/sashimi), the software is built for a particular microscope configuration, but the modular architecture allows for easy replacement of
-hardware by other vendors. Moreover, the software can easily interact with others through the library [PyZMQ](https://pyzmq.readthedocs.io/en/latest/index.html) which synchronizing imaging
-experiments with behavioral recording and stimulation protocols.
+hardware by other vendors.
  
 # Installation
 
@@ -26,7 +25,7 @@ The software uses the package `pyvisa` so oyu first need to install it:
 # User Interface
 
 
-From the GUI the user can specify different acquisition settings and interact with external hardware such as shutters, motorized stage and laser. 
+From the GUI the user can specify different acquisition settings and interact with external hardware such as shutters and motorized stage.
     
 # Software architecture
 

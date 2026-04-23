@@ -1,5 +1,5 @@
 from multiprocessing import Event, Queue
-from lightparam import Param, ParameterTree
+from lightparam import Param
 from lightparam.param_qt import ParametrizedQt
 from scanning import (
     Scanner,
@@ -7,23 +7,16 @@ from scanning import (
     ScanningState,
     RoiParameters,
     ImageReconstructor,
-    frame_duration,
 )
 from pathlib import Path
 from streaming_save import StackSaver, SavingParameters, SavingStatus
 from arrayqueues.shared_arrays import ArrayQueue
 from queue import Empty
 from brunoise.objective_motor import MotorControl
-from brunoise.external_communication import ZMQcomm
-from brunoise.power_control import LaserPowerControl
-from math import sqrt
 from PyQt5.QtCore import QObject, pyqtSignal
-from PyQt5.QtWidgets import QMessageBox
 from typing import Optional
 from time import sleep
 from sequence_diagram import SequenceDiagram
-import numpy as np
-
 import numpy as np
 
 
@@ -33,11 +26,10 @@ class ExperimentSettings(ParametrizedQt):
         self.name = "recording"
         self.lock_z = Param(True)
         self.n_planes = Param(1, (1, 500))
+        self.n_frames = Param(100, (1, 100000))
         self.dz = Param(1.0, (-50, 50.0), unit="um")
         self.channel = Param("Green", ["Green", "Red", "Both"])
         self.save_dir = Param(r"C:\Users\portugueslab\Desktop\test", gui=False)
-        self.notification_email = Param("None")
-        self.notify_every_n_planes = Param(3, (1, 1000))
 
 
 class ScanningSettings(ParametrizedQt):
@@ -50,7 +42,6 @@ class ScanningSettings(ParametrizedQt):
         self.shutter = Param(False)
         self.binning = Param(10, (1, 50))
         self.output_rate_khz = Param(400, (50, 2000))
-        self.laser_power = Param(10.0, (0, 100))
         self.n_turn = Param(10, (0, 100))
         self.n_extra_init = Param(100, (0, 100))
         self.pause = Param(1, (0, 1))  # Int as Boolean GUI generation is not supported.
@@ -140,16 +131,8 @@ class ExperimentState(QObject):
         self.roi_settings = RoiSettings()
         self.pause_after = False
 
-        self.parameter_tree = ParameterTree()
-        self.parameter_tree.add(self.scanning_settings)
-        self.parameter_tree.add(self.experiment_settings)
-
         self.end_event = Event()
-        self.external_sync = ZMQcomm()
-        self.duration_queue = Queue()
-        self.scanner = Scanner(
-            self.experiment_start_event, duration_queue=self.duration_queue
-        )
+        self.scanner = Scanner(self.experiment_start_event)
         self.scanning_parameters = None
         self.roi_parameters = None
         self.reconstructor = ImageReconstructor(
@@ -159,7 +142,7 @@ class ExperimentState(QObject):
         self.timestamp_queue = Queue()
 
         self.saver = StackSaver(
-            self.scanner.stop_event, self.save_queue, self.timestamp_queue, self.scanner.n_frames_queue
+            self.scanner.stop_event, self.save_queue, self.timestamp_queue
         )
         self.save_status: Optional[SavingStatus] = None
 
@@ -167,7 +150,6 @@ class ExperimentState(QObject):
         self.motors["x"] = MotorControl("COM5", axes="x")
         self.motors["y"] = MotorControl("COM5", axes="y")
         self.motors["z"] = MotorControl("COM5", axes="z")
-        self.power_controller = LaserPowerControl()
         self.scanning_settings.sig_param_changed.connect(self.send_scan_params)
         self.scanning_settings.sig_param_changed.connect(self.send_save_params)
         self.roi_settings.sig_param_changed.connect(self.send_scan_params)
@@ -186,20 +168,9 @@ class ExperimentState(QObject):
         self.send_scan_params()
 
     def start_experiment(self, first_plane=True):
-        duration = self.external_sync.send(self.parameter_tree.serialize())
-        if duration is None:
-            msg = QMessageBox()
-            msg.setIcon(QMessageBox.Critical)
-            msg.setText("Warning")
-            msg.setInformativeText("Couldn't make a connection with Stytra. Experiment not started.")
-            msg.setWindowTitle("Warning")
-            msg.exec_()
-
-            self.restart_scanning()
-            return False
-        self.duration_queue.put(duration)
         params_to_send = convert_params(self.scanning_settings)
         params_to_send.scanning_state = ScanningState.EXPERIMENT_RUNNING
+        params_to_send.n_frames = self.experiment_settings.n_frames
         self.scanner.parameter_queue.put(params_to_send)
         if first_plane:
             self.send_save_params()
@@ -250,7 +221,6 @@ class ExperimentState(QObject):
         """
         for motor in self.motors.values():
             motor.end_session()
-        self.power_controller.terminate_connection()
         self.scanner.stop_event.set()
         self.end_event.set()
         self.scanner.join()
@@ -279,7 +249,6 @@ class ExperimentState(QObject):
 
     def send_scan_params(self):
         self.scanning_parameters = convert_params(self.scanning_settings)
-        self.power_controller.move_abs(self.scanning_settings.laser_power)
         self.scanner.parameter_queue.put(self.scanning_parameters)
         self.roi_parameters = convert_roi_params(self.roi_settings)
         self.scanner.roi_queue.put(self.roi_parameters)
@@ -291,10 +260,9 @@ class ExperimentState(QObject):
             SavingParameters(
                 output_dir=Path(self.experiment_settings.save_dir),
                 plane_size=(self.scanning_parameters.n_x, self.scanning_parameters.n_y),
+                n_t=self.experiment_settings.n_frames,
                 n_z=self.experiment_settings.n_planes,
-                channel=self.experiment_settings.channel,
-                notification_email=self.experiment_settings.notification_email,
-                notification_frequency=self.experiment_settings.notify_every_n_planes
+                channel=self.experiment_settings.channel
             )
         )
 

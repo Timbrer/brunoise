@@ -12,7 +12,8 @@ from PyQt5.QtWidgets import (
     QFileDialog,
     QCheckBox,
 )
-from state import ExperimentState, ScanningParameters, frame_duration
+from state import ExperimentState
+from scanning import ScanningParameters, frame_duration
 from brunoise.objective_motor_sliders import MotionControlXYZ
 
 import pyqtgraph as pg

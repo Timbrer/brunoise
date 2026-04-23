@@ -2,3 +2,9 @@
 .idea
 __pycache__
 .vscode
+bruoise.egg-info/top_level.txt
+bruoise.egg-info/SOURCES.txt
+bruoise.egg-info/requires.txt
+bruoise.egg-info/PKG-INFO
+bruoise.egg-info/entry_points.txt
+bruoise.egg-info/dependency_links.txt

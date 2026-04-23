@@ -21,7 +21,6 @@ from copy import copy
 from dataclasses import dataclass
 from enum import Enum
 from time import sleep, perf_counter
-from math import ceil
 
 
 class ScanningState(Enum):
@@ -68,7 +67,7 @@ def compute_waveform(sp: ScanningParameters):
 
 
 class Scanner(Process):
-    def __init__(self, experiment_start_event, duration_queue, max_queuesize=200):
+    def __init__(self, experiment_start_event, max_queuesize=200):
         super().__init__()
         self.data_queue = ArrayQueue(max_mbytes=max_queuesize)
         self.time_queue = Queue()
@@ -80,8 +79,6 @@ class Scanner(Process):
         self.new_parameters = copy(self.scanning_parameters)
         self.roi_parameters = RoiParameters()
         self.new_roi_parameters = copy(self.roi_parameters)
-        self.duration_queue = duration_queue
-        self.n_frames_queue = Queue()
 
     def run(self):
         self.compute_scan_parameters()
@@ -163,16 +160,6 @@ class Scanner(Process):
             while not self.experiment_start_event.is_set():
                 sleep(0.00001)
 
-    def calculate_duration(self):
-        try:
-            duration = self.duration_queue.get(timeout=0.0001)
-            self.scanning_parameters.n_frames = (
-                int(ceil(duration / frame_duration(self.scanning_parameters))) + 1
-            )
-            self.n_frames_queue.put(self.scanning_parameters.n_frames)
-        except Empty:
-            pass
-
     def scan_loop(self, read_task, write_task):
         writer = AnalogMultiChannelWriter(write_task.out_stream)
         reader = AnalogMultiChannelReader(read_task.in_stream)
@@ -225,9 +212,6 @@ class Scanner(Process):
                     break
             except Empty:
                 pass
-
-            # calculate duration
-            self.calculate_duration()
 
     def pause_loop(self):
         while not self.stop_event.is_set():
