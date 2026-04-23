@@ -14,7 +14,6 @@ from queue import Empty
 from PyQt5.QtCore import QObject, pyqtSignal
 from typing import Optional
 from time import sleep
-from sequence_diagram import SequenceDiagram
 import numpy as np
 
 PIEZO_MAX_UM = 450.0
@@ -102,11 +101,8 @@ def convert_params(st: ScanningSettings, piezo_z_um=0.0) -> ScanningParameters:
 class ExperimentState(QObject):
     sig_scanning_changed = pyqtSignal()
 
-    def __init__(self, diagnostics=False):
+    def __init__(self):
         super().__init__()
-        if diagnostics:
-            self.sequence_queue = Queue()
-            self.sequence_diagram = SequenceDiagram(self.sequence_queue, "main")
 
         self.experiment_start_event = Event()
         self.scanning_settings = ScanningSettings()
