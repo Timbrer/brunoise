@@ -208,6 +208,11 @@ class ScanningWidget(QWidget):
     def update_display(self):
         self.scanning_calc.display_scanning_parameters(self.state.scanning_parameters)
 
+    def set_controls_enabled(self, enabled: bool):
+        self.scanning_settings_gui.setEnabled(enabled)
+        self.chk_inverted.setEnabled(enabled)
+        self.pause_button.setEnabled(enabled)
+
     def update_button(self):
         if self.state.paused:
             self.pause_button.setText("Resume")
@@ -256,6 +261,11 @@ class TwopViewer(QMainWindow):
         self.image_display.update()
         self.piezo_z_control.sync_state()
         self.experiment_widget.update()
+
+        scanning_controls_enabled = not (
+                self.state.saving or self.state.save_in_progress
+        )
+        self.scanning_widget.set_controls_enabled(scanning_controls_enabled)
 
     def closeEvent(self, event) -> None:
         self.state.close_setup()

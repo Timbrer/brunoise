@@ -40,7 +40,7 @@ def simple_scanning_pattern(n_x, n_y, n_turn, n_extra_points=20):
         points_x.extend(path_x)
         points_y.extend([i_y for _ in range(len(path_x))])
 
-    points_x.extend([0 for _ in range(n_extra_points)])
+    points_x.extend([-1 for _ in range(n_extra_points)])
     points_y.extend([0 for _ in range(n_extra_points)])
 
     return np.array(points_x), np.array(points_y)

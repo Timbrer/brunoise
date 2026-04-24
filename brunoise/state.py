@@ -37,8 +37,8 @@ class ScanningSettings(ParametrizedQt):
     def __init__(self):
         super().__init__()
         self.name = "scanning"
-        self.n_pixel_x = Param(400, (1, 4096))
-        self.n_pixel_y = Param(400, (1, 4096))
+        self.n_pixel_x = Param(200, (1, 4096))
+        self.n_pixel_y = Param(200, (1, 4096))
         self.galvo_voltage = Param(3.0, (0.2, 5.0), unit="V")
         self.output_rate_khz = Param(
             100.0, (1.0, NI_USB_6363_MAX_AO_SAMPLE_RATE_3_CHANNELS / 1000), unit="kHz"

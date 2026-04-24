@@ -25,8 +25,8 @@ from enum import Enum
 from time import sleep, perf_counter
 
 
-NI_USB_6363_MAX_AI_SAMPLE_RATE = 2000000.0
-NI_USB_6363_MAX_AO_SAMPLE_RATE_3_CHANNELS = 1540000.0
+NI_USB_6363_MAX_AI_SAMPLE_RATE = 2000000.0 * 0.8
+NI_USB_6363_MAX_AO_SAMPLE_RATE_3_CHANNELS = 1540000.0 * 0.8
 
 
 class ScanningState(Enum):
@@ -37,8 +37,8 @@ class ScanningState(Enum):
 
 @dataclass
 class ScanningParameters:
-    n_x: int = 400
-    n_y: int = 400
+    n_x: int = 200
+    n_y: int = 200
     voltage_x: float = 3
     voltage_y: float = 3
     voltage_z: float = 0
