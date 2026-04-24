@@ -25,6 +25,10 @@ from enum import Enum
 from time import sleep, perf_counter
 
 
+NI_USB_6363_MAX_AI_SAMPLE_RATE = 2000000.0
+NI_USB_6363_MAX_AO_SAMPLE_RATE_3_CHANNELS = 1540000.0
+
+
 class ScanningState(Enum):
     PREVIEW = 1
     EXPERIMENT_RUNNING = 2
@@ -38,23 +42,33 @@ class ScanningParameters:
     voltage_x: float = 3
     voltage_y: float = 3
     voltage_z: float = 0
-    n_bin: int = 10
+    n_bin: int = 5
     n_turn: int = 10
-    n_extra: int = 10
+    n_extra: int = 100
     signal_delay_us: float = 80.0
-    sample_rate_out: float = 500000.0
+    sample_rate_out: float = 100000.0
     scanning_state: ScanningState = ScanningState.PREVIEW
     n_frames: int = 100
-    framerate: float = 2.0
-    pause: bool = True
+    framerate: float = 0.5935422602089269
 
 
 def n_output_samples(sp: ScanningParameters):
-    return scanning_patterns.n_total(sp.n_x, sp.n_y, sp.n_turn, sp.n_extra, sp.pause)
+    return scanning_patterns.n_total(sp.n_x, sp.n_y, sp.n_turn, sp.n_extra)
 
 
 def sample_rate_in(sp: ScanningParameters):
     return sp.sample_rate_out * sp.n_bin
+
+
+def max_sample_rate_out_for_binning(n_bin):
+    return min(
+        NI_USB_6363_MAX_AO_SAMPLE_RATE_3_CHANNELS,
+        NI_USB_6363_MAX_AI_SAMPLE_RATE / max(1, n_bin),
+    )
+
+
+def limit_sample_rate_out(sample_rate_out, n_bin):
+    return min(float(sample_rate_out), max_sample_rate_out_for_binning(n_bin))
 
 
 def frame_duration(sp: ScanningParameters):
@@ -76,7 +90,7 @@ def signal_delay_samples(sp: ScanningParameters):
 
 def compute_waveform(sp: ScanningParameters):
     return scanning_patterns.simple_scanning_pattern(
-        sp.n_x, sp.n_y, sp.n_turn, sp.n_extra, sp.pause
+        sp.n_x, sp.n_y, sp.n_turn, sp.n_extra
     )
 
 class Scanner(Process):
@@ -95,6 +109,12 @@ class Scanner(Process):
         self.run_scanning()
 
     def compute_scan_parameters(self):
+        self.scanning_parameters.sample_rate_out = limit_sample_rate_out(
+            self.scanning_parameters.sample_rate_out,
+            self.scanning_parameters.n_bin,
+        )
+        self.scanning_parameters.framerate = frame_rate(self.scanning_parameters)
+
         self.extent_x = (
             -self.scanning_parameters.voltage_x,
             self.scanning_parameters.voltage_x,
@@ -203,7 +223,7 @@ class Scanner(Process):
                 reader.read_many_sample(
                     self.read_buffer,
                     number_of_samples_per_channel=self.n_samples_in,
-                    timeout=1,
+                    timeout=max(1.0, self.plane_duration * 2 + 0.1),
                 )
                 self.time_queue.put(perf_counter())
                 i_acquired += 1

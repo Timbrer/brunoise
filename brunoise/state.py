@@ -6,7 +6,9 @@ from scanning import (
     ScanningParameters,
     ScanningState,
     ImageReconstructor,
+    NI_USB_6363_MAX_AO_SAMPLE_RATE_3_CHANNELS,
     frame_rate,
+    limit_sample_rate_out,
 )
 from pathlib import Path
 from streaming_save import StackSaver, SavingParameters, SavingStatus
@@ -38,12 +40,13 @@ class ScanningSettings(ParametrizedQt):
         self.n_pixel_x = Param(400, (1, 4096))
         self.n_pixel_y = Param(400, (1, 4096))
         self.galvo_voltage = Param(3.0, (0.2, 5.0), unit="V")
-        self.output_rate_khz = Param(400.0, (50.0, 2000.0), unit="kHz")
-        self.binning = Param(10, (1, 50))
+        self.output_rate_khz = Param(
+            100.0, (1.0, NI_USB_6363_MAX_AO_SAMPLE_RATE_3_CHANNELS / 1000), unit="kHz"
+        )
+        self.binning = Param(5, (1, 20))
         self.n_turn = Param(10, (0, 100))
         self.n_extra_point = Param(100, (0, 100000))
         self.signal_delay_us = Param(80.0, (-10000.0, 10000.0), unit="us")
-        self.pause = Param(1, (0, 1))  # Int as Boolean GUI generation is not supported.
 
 
 def convert_params(st: ScanningSettings, piezo_z_um=0.0) -> ScanningParameters:
@@ -52,13 +55,13 @@ def convert_params(st: ScanningSettings, piezo_z_um=0.0) -> ScanningParameters:
     laser scanning
 
     """
-    pause = True if st.pause else False
-
-    sample_rate = st.output_rate_khz * 1000
+    n_bin = int(st.binning)
+    requested_sample_rate = float(st.output_rate_khz) * 1000
+    sample_rate = limit_sample_rate_out(requested_sample_rate, n_bin)
     n_x = int(st.n_pixel_x)
     n_y = int(st.n_pixel_y)
 
-    voltage_max = st.galvo_voltage
+    voltage_max = float(st.galvo_voltage)
     if n_y >= n_x:
         voltage_y = voltage_max
         voltage_x = voltage_y * n_x / n_y
@@ -75,10 +78,9 @@ def convert_params(st: ScanningSettings, piezo_z_um=0.0) -> ScanningParameters:
         n_y=int(n_y),
         n_turn=int(st.n_turn),
         n_extra=int(st.n_extra_point),
-        n_bin=int(st.binning),
+        n_bin=n_bin,
         sample_rate_out=float(sample_rate),
         signal_delay_us=float(st.signal_delay_us),
-        pause=pause
     )
     sp.framerate = frame_rate(sp)
     return sp

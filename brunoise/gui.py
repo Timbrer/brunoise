@@ -15,10 +15,8 @@ from state import ExperimentState
 from scanning import (
     ScanningParameters,
     dwell_time_s,
-    frame_duration,
     n_output_samples,
     sample_rate_in,
-    signal_delay_samples,
 )
 from brunoise.piezo_z_control import PiezoZControl
 
@@ -34,22 +32,16 @@ class CalculatedParameterDisplay(QWidget):
         self.setLayout(QVBoxLayout())
         self.lbl_frameinfo = QLabel()
         self.layout().addWidget(self.lbl_frameinfo)
-        self.lbl_frameinfo.setMinimumHeight(180)
+        self.lbl_frameinfo.setMinimumHeight(120)
 
     def display_scanning_parameters(self, sp: ScanningParameters):
         output_samples = n_output_samples(sp)
-        input_samples = output_samples * sp.n_bin
         self.lbl_frameinfo.setText(
-            "Resolution: {} x {}\n".format(sp.n_x, sp.n_y)
-            + "Output samples/frame: {}\n".format(output_samples)
-            + "Input samples/frame: {}\n".format(input_samples)
-            + "Frame duration: {:.3f} s\n".format(frame_duration(sp))
+            "Total samples/frame: {}\n".format(output_samples)
             + "Frame rate: {:.3f} Hz\n".format(sp.framerate)
             + "Output rate: {:.1f} kHz\n".format(sp.sample_rate_out / 1000)
             + "Input rate: {:.1f} kHz\n".format(sample_rate_in(sp) / 1000)
-            + "Dwell time: {:.3f} us\n".format(dwell_time_s(sp) * 1e6)
-            + "Extra points: {}\n".format(sp.n_extra)
-            + "Signal delay: {} samples".format(signal_delay_samples(sp))
+            + "Dwell time: {:.3f} us".format(dwell_time_s(sp) * 1e6)
         )
 
 
@@ -215,8 +207,6 @@ class ScanningWidget(QWidget):
 
     def update_display(self):
         self.scanning_calc.display_scanning_parameters(self.state.scanning_parameters)
-
-        self.pause_button.setEnabled(self.state.scanning_parameters.pause)
 
     def update_button(self):
         if self.state.paused:
