@@ -41,19 +41,37 @@ class ScanningParameters:
     n_bin: int = 10
     n_turn: int = 10
     n_extra: int = 10
-    mystery_offset: int = -400
+    signal_delay_us: float = 80.0
     sample_rate_out: float = 500000.0
     scanning_state: ScanningState = ScanningState.PREVIEW
     n_frames: int = 100
-    framerate: int = 2
+    framerate: float = 2.0
     pause: bool = True
 
 
+def n_output_samples(sp: ScanningParameters):
+    return scanning_patterns.n_total(sp.n_x, sp.n_y, sp.n_turn, sp.n_extra, sp.pause)
+
+
+def sample_rate_in(sp: ScanningParameters):
+    return sp.sample_rate_out * sp.n_bin
+
+
 def frame_duration(sp: ScanningParameters):
-    return (
-        scanning_patterns.n_total(sp.n_x, sp.n_y, sp.n_turn, sp.n_extra, sp.pause)
-        / sp.sample_rate_out
-    )
+    return n_output_samples(sp) / sp.sample_rate_out
+
+
+def frame_rate(sp: ScanningParameters):
+    return 1.0 / frame_duration(sp)
+
+
+def dwell_time_s(sp: ScanningParameters):
+    return 1.0 / sp.sample_rate_out
+
+
+def signal_delay_samples(sp: ScanningParameters):
+    return -int(round(sp.signal_delay_us * sample_rate_in(sp) / 1000000.0))
+
 
 
 def compute_waveform(sp: ScanningParameters):
@@ -106,7 +124,7 @@ class Scanner(Process):
         self.sample_rate_out = self.scanning_parameters.sample_rate_out
         self.plane_duration = self.n_samples_out / self.sample_rate_out
 
-        self.sample_rate_in = self.n_bin * self.sample_rate_out
+        self.sample_rate_in = sample_rate_in(self.scanning_parameters)
 
         self.write_signals = np.stack(
             [
@@ -117,7 +135,6 @@ class Scanner(Process):
             0,
         )
         self.read_buffer = np.zeros((1, self.n_samples_in))
-        self.mystery_offset = self.scanning_parameters.mystery_offset
 
     def setup_tasks(self, read_task, write_task):
         # Configure the acquisition and galvo output lines.
@@ -219,12 +236,7 @@ class Scanner(Process):
         while not self.stop_event.is_set():
             try:
                 self.new_parameters = self.parameter_queue.get(timeout=0.001)
-                if self.new_parameters != self.scanning_parameters and (
-                    self.scanning_parameters.scanning_state
-                    != ScanningState.EXPERIMENT_RUNNING
-                    or self.new_parameters.scanning_state in (ScanningState.PREVIEW,
-                                                              ScanningState.PAUSED)
-                ):
+                if self.new_parameters != self.scanning_parameters:
                     break
             except Empty:
                 pass
@@ -265,13 +277,18 @@ class ImageReconstructor(Process):
 
             try:
                 images = self.data_in_queue.get(timeout=0.001)
+                if self.scanning_parameters is None or self.waveform is None:
+                    continue
                 recon_images = []
                 for image in images:
                     recon_images.append(
                         scanning_patterns.reconstruct_image_pattern(
-                            np.roll(image, self.scanning_parameters.mystery_offset),
+                            np.roll(
+                                image,
+                                signal_delay_samples(self.scanning_parameters),
+                            ),
                             *self.waveform,
-                            (self.scanning_parameters.n_x, self.scanning_parameters.n_y),
+                            (self.scanning_parameters.n_y, self.scanning_parameters.n_x),
                             self.scanning_parameters.n_bin,
                         )
                     )

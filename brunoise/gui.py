@@ -12,7 +12,14 @@ from PyQt5.QtWidgets import (
     QCheckBox,
 )
 from state import ExperimentState
-from scanning import ScanningParameters, frame_duration
+from scanning import (
+    ScanningParameters,
+    dwell_time_s,
+    frame_duration,
+    n_output_samples,
+    sample_rate_in,
+    signal_delay_samples,
+)
 from brunoise.piezo_z_control import PiezoZControl
 
 import pyqtgraph as pg
@@ -27,16 +34,22 @@ class CalculatedParameterDisplay(QWidget):
         self.setLayout(QVBoxLayout())
         self.lbl_frameinfo = QLabel()
         self.layout().addWidget(self.lbl_frameinfo)
-        self.lbl_frameinfo.setMinimumHeight(120)
+        self.lbl_frameinfo.setMinimumHeight(180)
 
     def display_scanning_parameters(self, sp: ScanningParameters):
+        output_samples = n_output_samples(sp)
+        input_samples = output_samples * sp.n_bin
         self.lbl_frameinfo.setText(
             "Resolution: {} x {}\n".format(sp.n_x, sp.n_y)
-            + "Estimated frame duration {:.3f}\n".format(frame_duration(sp))
-            + "Extra pixels {}\n".format(sp.n_extra)
-            + "Line scanning frequency {:.2f}Hz".format(
-                sp.sample_rate_out / (2 * (sp.n_x + sp.n_turn))
-            )
+            + "Output samples/frame: {}\n".format(output_samples)
+            + "Input samples/frame: {}\n".format(input_samples)
+            + "Frame duration: {:.3f} s\n".format(frame_duration(sp))
+            + "Frame rate: {:.3f} Hz\n".format(sp.framerate)
+            + "Output rate: {:.1f} kHz\n".format(sp.sample_rate_out / 1000)
+            + "Input rate: {:.1f} kHz\n".format(sample_rate_in(sp) / 1000)
+            + "Dwell time: {:.3f} us\n".format(dwell_time_s(sp) * 1e6)
+            + "Extra points: {}\n".format(sp.n_extra)
+            + "Signal delay: {} samples".format(signal_delay_samples(sp))
         )
 
 

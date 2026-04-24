@@ -6,6 +6,7 @@ from scanning import (
     ScanningParameters,
     ScanningState,
     ImageReconstructor,
+    frame_rate,
 )
 from pathlib import Path
 from streaming_save import StackSaver, SavingParameters, SavingStatus
@@ -34,13 +35,14 @@ class ScanningSettings(ParametrizedQt):
     def __init__(self):
         super().__init__()
         self.name = "scanning"
-        self.aspect_ratio = Param(1.0, (0.2, 5.0))
-        self.voltage = Param(3.0, (0.2, 5.0))
-        self.framerate = Param(2.0, (0.1, 10.0))
+        self.n_pixel_x = Param(400, (1, 4096))
+        self.n_pixel_y = Param(400, (1, 4096))
+        self.galvo_voltage = Param(3.0, (0.2, 5.0), unit="V")
+        self.output_rate_khz = Param(400.0, (50.0, 2000.0), unit="kHz")
         self.binning = Param(10, (1, 50))
-        self.output_rate_khz = Param(400, (50, 2000))
         self.n_turn = Param(10, (0, 100))
-        self.n_extra_init = Param(100, (0, 100))
+        self.n_extra_point = Param(100, (0, 100000))
+        self.signal_delay_us = Param(80.0, (-10000.0, 10000.0), unit="us")
         self.pause = Param(1, (0, 1))  # Int as Boolean GUI generation is not supported.
 
 
@@ -53,48 +55,32 @@ def convert_params(st: ScanningSettings, piezo_z_um=0.0) -> ScanningParameters:
     pause = True if st.pause else False
 
     sample_rate = st.output_rate_khz * 1000
-    n_total = sample_rate / st.framerate
-    # Loosens the restraint by 2 * the turn value, as the first and last line require one turn less.
-    n_total += 2 * st.n_turn
+    n_x = int(st.n_pixel_x)
+    n_y = int(st.n_pixel_y)
 
-    # Solving for the biggest image surface is basically a constraint problem of the form:
-    # ax**2 + bx + c = 0, where a is the aspect ratio (can be seen as y * x where y = a * x), b is the two turns,
-    # and c is the total number of available positions (given the desired frequency and sampling rate).
-    b = 2 * st.n_turn
-    if pause:  # If pause is enabled, additional points dependent on x will be added to the trajectory.
-        b += 1
-    n = (-b + np.sqrt(b**2 - (4 * st.aspect_ratio * -n_total))) / (2 * st.aspect_ratio) # Image dimensions.
-
-    # Change the y-axis to get the right aspect ratio.
-    n_x = int(np.floor(n))
-    n_y = int(np.floor(n * st.aspect_ratio))
-
-    # No need to get rid of 2 turns, we already added it before.
-    n_extra = int(n_total - ((n_x * b) + (n_x*n_y)))
-
-    mystery_offset = -int(round(st.output_rate_khz * 0.8))
-    voltage_max = st.voltage
-    if st.aspect_ratio >= 1:
+    voltage_max = st.galvo_voltage
+    if n_y >= n_x:
         voltage_y = voltage_max
-        voltage_x = voltage_y / st.aspect_ratio
+        voltage_x = voltage_y * n_x / n_y
     else:
-        voltage_y = voltage_max * st.aspect_ratio
         voltage_x = voltage_max
+        voltage_y = voltage_x * n_y / n_x
     voltage_z = float(np.clip(piezo_z_um / PIEZO_UM_PER_VOLT, 0.0, PIEZO_MAX_VOLTAGE))
 
     sp = ScanningParameters(
-        voltage_x=voltage_x,
-        voltage_y=voltage_y,
+        voltage_x=float(voltage_x),
+        voltage_y=float(voltage_y),
         voltage_z=voltage_z,
-        n_x=n_x,
-        n_y=n_y,
-        n_turn=st.n_turn,
-        n_extra=n_extra,
-        sample_rate_out=sample_rate,
-        mystery_offset=mystery_offset,
-        framerate=st.framerate,
+        n_x=int(n_x),
+        n_y=int(n_y),
+        n_turn=int(st.n_turn),
+        n_extra=int(st.n_extra_point),
+        n_bin=int(st.binning),
+        sample_rate_out=float(sample_rate),
+        signal_delay_us=float(st.signal_delay_us),
         pause=pause
     )
+    sp.framerate = frame_rate(sp)
     return sp
 
 
@@ -288,7 +274,7 @@ class ExperimentState(QObject):
         self.saver.saving_parameter_queue.put(
             SavingParameters(
                 output_dir=Path(self.experiment_settings.save_dir),
-                plane_size=(self.scanning_parameters.n_x, self.scanning_parameters.n_y),
+                plane_size=(self.scanning_parameters.n_y, self.scanning_parameters.n_x),
                 n_t=n_t,
                 n_z=n_z,
                 plane_z_um=plane_z_um,
