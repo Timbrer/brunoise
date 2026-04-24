@@ -5,13 +5,13 @@ try:
     from nidaqmx import Task
     from nidaqmx.stream_readers import AnalogMultiChannelReader
     from nidaqmx.stream_writers import AnalogMultiChannelWriter
-    from nidaqmx.constants import Edge, AcquisitionType
+    from nidaqmx.constants import Edge, AcquisitionType, RegenerationMode
     from nidaqmx.errors import DaqError
 except ImportError:
     from theknights.task import Task
     from theknights.stream_readers import AnalogMultiChannelReader
     from theknights.stream_writers import AnalogMultiChannelWriter
-    from theknights.constants import Edge, AcquisitionType
+    from theknights.constants import Edge, AcquisitionType, RegenerationMode
     from theknights.errors import DaqError
 
 
@@ -164,13 +164,16 @@ class Scanner(Process):
         write_task.ao_channels.add_ao_voltage_chan("Dev1/ao0", min_val=-5, max_val=5)
         write_task.ao_channels.add_ao_voltage_chan("Dev1/ao1", min_val=-5, max_val=5)
         write_task.ao_channels.add_ao_voltage_chan("Dev1/ao2", min_val=0, max_val=10)
+
+        write_task.out_stream.regen_mode = RegenerationMode.ALLOW_REGENERATION
+
         # Set the timing of both to the onboard clock so that they are synchronised
         read_task.timing.cfg_samp_clk_timing(
             rate=self.sample_rate_in,
             source="OnboardClock",
             active_edge=Edge.RISING,
             sample_mode=AcquisitionType.CONTINUOUS,
-            samps_per_chan=self.n_samples_in,
+            samps_per_chan=self.n_samples_in * 16,
         )
         write_task.timing.cfg_samp_clk_timing(
             rate=self.sample_rate_out,
@@ -204,22 +207,20 @@ class Scanner(Process):
         writer = AnalogMultiChannelWriter(write_task.out_stream)
         reader = AnalogMultiChannelReader(read_task.in_stream)
 
-        first_write = True
         i_acquired = 0
-        while not self.stop_event.is_set() and (
-            not self.scanning_parameters.scanning_state
-            == ScanningState.EXPERIMENT_RUNNING
-            or i_acquired < self.scanning_parameters.n_frames
-        ):
-            # The first write has to be defined before the task starts
-            try:
-                writer.write_many_sample(self.write_signals)
-                if i_acquired == 0:
-                    self.check_start_plane()
-                if first_write:
-                    read_task.start()
-                    write_task.start()
-                    first_write = False
+        try:
+            writer.write_many_sample(self.write_signals)
+
+            read_task.start()
+            if i_acquired == 0:
+                self.check_start_plane()
+            write_task.start()
+
+            while not self.stop_event.is_set() and (
+                    not self.scanning_parameters.scanning_state
+                        == ScanningState.EXPERIMENT_RUNNING
+                    or i_acquired < self.scanning_parameters.n_frames
+            ):
                 reader.read_many_sample(
                     self.read_buffer,
                     number_of_samples_per_channel=self.n_samples_in,
@@ -227,29 +228,31 @@ class Scanner(Process):
                 )
                 self.time_queue.put(perf_counter())
                 i_acquired += 1
-            except DaqError as e:
-                print(e)
-                break
-            raw_frame = self.read_buffer.copy()
-            self.data_queue.put(raw_frame)
-            # if new parameters have been received and changed, update
-            # them, breaking out of the loop if the experiment is not running
-            try:
-                self.new_parameters = self.parameter_queue.get(timeout=0.0001)
-                if self.new_parameters != self.scanning_parameters and (
-                    self.scanning_parameters.scanning_state
-                    != ScanningState.EXPERIMENT_RUNNING
-                    or self.new_parameters.scanning_state in (ScanningState.PREVIEW,
-                                                              ScanningState.PAUSED)
-                ):
-                    break
-            except Empty:
-                pass
+
+                raw_frame = self.read_buffer.copy()
+                self.data_queue.put(raw_frame)
+
+                try:
+                    self.new_parameters = self.parameter_queue.get(timeout=0.0001)
+                    if self.new_parameters != self.scanning_parameters and (
+                            self.scanning_parameters.scanning_state
+                            != ScanningState.EXPERIMENT_RUNNING
+                            or self.new_parameters.scanning_state in (
+                                    ScanningState.PREVIEW,
+                                    ScanningState.PAUSED,
+                            )
+                    ):
+                        break
+                except Empty:
+                    pass
+
+        except DaqError as e:
+            print(e)
 
         return (
-            not self.stop_event.is_set()
-            and self.scanning_parameters.scanning_state == ScanningState.EXPERIMENT_RUNNING
-            and i_acquired >= self.scanning_parameters.n_frames
+                not self.stop_event.is_set()
+                and self.scanning_parameters.scanning_state == ScanningState.EXPERIMENT_RUNNING
+                and i_acquired >= self.scanning_parameters.n_frames
         )
 
     def pause_loop(self):
